@@ -16,7 +16,8 @@ st.title("📊 Brazilian E-Commerce Public Dataset Dashboard")
 # Load Data
 @st.cache_data
 def load_data():
-    base_path = r"C:\DICODING\Proyek Analisis Data\E-Commerce Public Dataset"  
+    base_path = os.path.join(os.path.dirname(__file__), "E-Commerce Public Dataset")
+    
     orders = pd.read_csv(os.path.join(base_path, "orders_dataset.csv"), parse_dates=[
         "order_purchase_timestamp", "order_approved_at",
         "order_delivered_carrier_date", "order_delivered_customer_date",
