@@ -46,6 +46,24 @@ orders["status_ketepatan"] = np.where(
     "On Time", "Late"
 )
 
+min_date = orders["order_purchase_timestamp"].min().date()
+max_date = orders["order_purchase_timestamp"].max().date()
+
+date_range = st.sidebar.date_input(
+    "Select Order Date Range",
+    [min_date, max_date],
+    min_value=min_date,
+    max_value=max_date
+)
+
+if len(date_range) == 2:
+    start_date, end_date = date_range
+    orders = orders[
+        (orders["order_purchase_timestamp"].dt.date >= start_date) &
+        (orders["order_purchase_timestamp"].dt.date <= end_date)
+    ]
+st.markdown(f"**Selected Period:** {start_date} to {end_date}")
+
 # Merge customers + orders
 customer_orders = pd.merge(customers, orders, on="customer_id", how="inner")
 
@@ -65,15 +83,15 @@ st.header("📌 Overview")
 col1, col2, col3 = st.columns(3)
 col1.metric("Total Customers", customer_orders["customer_id"].nunique())
 col2.metric("Total Orders", customer_orders["order_id"].nunique())
-col3.metric("Total Revenue (R$)", round(orders_items_product["price"].sum(),2))
+total_revenue = orders_items_product["price"].sum()
+col3.metric("Total Revenue (R$)", f"{total_revenue:,.2f}")
 
 # ------------------ TOP 10 PRODUCT REVENUE ------------------ #
 st.header("🛒 Product Analysis")
-product_summary = orders_items_product.groupby("product_id").agg({
-    "order_item_id":"count",
-    "price":"mean"
-}).rename(columns={"order_item_id":"quantity_sold"}).reset_index()
-product_summary["total_revenue"] = product_summary["quantity_sold"] * product_summary["price"]
+product_summary = orders_items_product.groupby("product_id").agg(
+    quantity_sold=("order_item_id", "count"),
+    total_revenue=("price", "sum")
+).reset_index()
 top_products = product_summary.sort_values("total_revenue", ascending=False).head(10)
 
 fig1 = px.bar(
