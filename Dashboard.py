@@ -1,3 +1,7 @@
+# =======================================
+# Brazilian E-Commerce Dashboard (Streamlit)
+# =======================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -14,10 +18,7 @@ st.title("📊 Brazilian E-Commerce Dashboard")
 
 # ------------------ LOAD DATA ------------------ #
 @st.cache_data
-def load_data():
-    # Ganti base_path sesuai folder dataset Streamlit
-    base_path = os.path.join(os.path.dirname(__file__), "E-Commerce Public Dataset")
-    
+def load_data(base_path):
     orders = pd.read_csv(os.path.join(base_path, "orders_dataset.csv"), parse_dates=[
         "order_purchase_timestamp", "order_approved_at",
         "order_delivered_carrier_date", "order_delivered_customer_date",
@@ -28,94 +29,82 @@ def load_data():
     products = pd.read_csv(os.path.join(base_path, "products_dataset.csv"))
     customers = pd.read_csv(os.path.join(base_path, "customers_dataset.csv"))
     geolocation = pd.read_csv(os.path.join(base_path, "geolocation_dataset.csv"))
-    category_translation = pd.read_csv(
-        os.path.join(base_path, "product_category_name_translation.csv")
-    )
+    category_translation = pd.read_csv(os.path.join(base_path, "product_category_name_translation.csv"))
     
     return orders, order_items, products, customers, geolocation, category_translation
 
-
-orders, order_items, products, customers, geolocation, category_translation = load_data()
-
-# ------------------ CLEANING ------------------ #
-
-# Fokus hanya pada orders delivered
-orders = orders[orders["order_status"] == "delivered"].copy()
-
-# Buat indikator ketepatan waktu
-orders["status_ketepatan"] = np.where(
-    orders["order_delivered_customer_date"] < orders["order_estimated_delivery_date"],
-    "On Time",
-    "Late"
-)
-
-# Fill missing product info
-products = products.drop(columns=[
-    "product_name_lenght",
-    "product_description_lenght",
-    "product_weight_g",
-    "product_length_cm",
-    "product_height_cm",
-    "product_width_cm"
-])
-
-products["product_category_name"] = products["product_category_name"].fillna("outro")
-products["product_photos_qty"] = products["product_photos_qty"].fillna(0)
+# Ganti path dataset sesuai project Streamlit
+base_path = os.path.join(os.path.dirname(__file__), "E-Commerce Public Dataset")
+orders, order_items, products, customers, geolocation, category_translation = load_data(base_path)
 
 # ------------------ SIDEBAR FILTER ------------------ #
 st.sidebar.title("Filter Options")
 
-# Filter tanggal opsional
+# Tentukan min dan max tanggal dari dataset
 min_date = orders["order_purchase_timestamp"].min().date()
 max_date = orders["order_purchase_timestamp"].max().date()
 
+# Sidebar date input
 date_range = st.sidebar.date_input(
-    "Select Order Date Range (Optional)",
+    "Select Order Date Range",
     [min_date, max_date],
     min_value=min_date,
     max_value=max_date
 )
 
+# Filter orders sesuai tanggal
 if len(date_range) == 2:
     start_date, end_date = date_range
-    orders = orders[
+    st.sidebar.markdown(f"Selected Period: **{start_date} to {end_date}**")
+    orders_filtered = orders[
         (orders["order_purchase_timestamp"].dt.date >= start_date) &
         (orders["order_purchase_timestamp"].dt.date <= end_date)
-    ]
-    st.markdown(f"**Selected Period:** {start_date} to {end_date}")
+    ].copy()
+else:
+    orders_filtered = orders.copy()
+
+# ------------------ CLEANING ------------------ #
+
+# Hanya delivered orders
+orders_filtered = orders_filtered[orders_filtered["order_status"] == "delivered"].copy()
+
+# Indikator ketepatan waktu
+orders_filtered["status_ketepatan"] = np.where(
+    orders_filtered["order_delivered_customer_date"] <= orders_filtered["order_estimated_delivery_date"],
+    "On Time",
+    "Late"
+)
+
+# Clean products
+products = products.drop(columns=[
+    "product_name_lenght", "product_description_lenght",
+    "product_weight_g", "product_length_cm",
+    "product_height_cm", "product_width_cm"
+])
+products["product_category_name"] = products["product_category_name"].fillna("outro")
+products["product_photos_qty"] = products["product_photos_qty"].fillna(0)
 
 # ------------------ MERGING DATA ------------------ #
 
-# Customers + Orders
-customer_orders = pd.merge(customers, orders, on="customer_id", how="inner")
-
-# Order Items + Products
+# Order Items + Products + Category
 items_product = pd.merge(order_items, products, on="product_id", how="inner")
-items_product = pd.merge(
-    items_product,
-    category_translation,
-    on="product_category_name",
-    how="left"
-)
+items_product = pd.merge(items_product, category_translation, on="product_category_name", how="left")
 
-# Orders + Items + Category
-orders_items_product = pd.merge(
-    orders,
-    items_product,
-    on="order_id",
-    how="inner"
-)
+# Orders + Items
+orders_items_product = pd.merge(orders_filtered, items_product, on="order_id", how="inner")
+
+# Customers + Orders
+customer_orders = pd.merge(customers, orders_filtered, on="customer_id", how="inner")
 
 # ------------------ OVERVIEW ------------------ #
 st.header("📌 Overview")
 col1, col2, col3 = st.columns(3)
-
 col1.metric("Total Customers", customer_orders["customer_unique_id"].nunique())
-col2.metric("Total Orders", customer_orders["order_id"].nunique())
+col2.metric("Total Orders", orders_items_product["order_id"].nunique())
 col3.metric("Total Revenue (R$)", f"{orders_items_product['price'].sum():,.2f}")
 
 # ------------------ TOP 10 PRODUCT CATEGORY ------------------ #
-st.header("🛒 Product Category Analysis")
+st.header("🛒 Product Categories Analysis")
 
 product_summary = orders_items_product.groupby("product_category_name_english").agg(
     quantity_sold=("order_item_id", "count"),
@@ -131,11 +120,9 @@ fig1 = px.bar(
     color="total_revenue",
     color_continuous_scale=px.colors.sequential.Blues,
     text="total_revenue",
-    labels={"product_category_name_english": "Product Category",
-            "total_revenue": "Revenue (R$)"},
+    labels={"product_category_name_english": "Product Category", "total_revenue": "Revenue (R$)"},
     title="Top 10 Product Categories by Revenue"
 )
-
 fig1.update_traces(texttemplate="R$ %{text:,.0f}", textposition="outside")
 fig1.update_layout(xaxis_tickangle=-45)
 st.plotly_chart(fig1, use_container_width=True)
@@ -148,7 +135,7 @@ geolocation_silver = geolocation.groupby(
     ['geolocation_zip_code_prefix', 'geolocation_city', 'geolocation_state']
 )[['geolocation_lat', 'geolocation_lng']].median().reset_index()
 
-# Gabungkan dengan customer_orders
+# Merge dengan customer_orders
 customers_geo = pd.merge(
     customer_orders,
     geolocation_silver,
